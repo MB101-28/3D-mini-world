@@ -50,6 +50,27 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
       aria-modal="true"
       aria-labelledby="welcome-heading"
     >
+      {/* Top-Left Day & Night Celestial Circles Toggle */}
+      <div className="fixed top-3 left-3 sm:top-5 sm:left-5 z-30 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.currentTarget.blur();
+            window.dispatchEvent(new CustomEvent('poko:cycle-day-night'));
+          }}
+          aria-label="Cycle Day and Night celestial circles [T or N]"
+          title="Toggle Day & Night Circles [T / N]"
+          className="pointer-events-auto arcade-pill-brown rounded-full px-3 py-1.5 md:px-3.5 md:py-2 flex items-center gap-2 cursor-pointer transition-transform duration-100 hover:scale-105 active:scale-95"
+        >
+          <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 border border-[#140c04] flex items-center justify-center text-xs shadow-inner">
+            ☀️
+          </div>
+          <span className="arcade-stroke-sm text-white text-xs md:text-sm">
+            DAY / NIGHT [T]
+          </span>
+        </button>
+      </div>
+
       {/* Top-Right Top-Tufted Terracotta Squircle Audio Button */}
       <div className="fixed top-3 right-3 sm:top-5 sm:right-5 z-30">
         <button

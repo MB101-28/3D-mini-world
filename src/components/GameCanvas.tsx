@@ -33,6 +33,13 @@ import {
   createSkyBalloonMesh,
   createSpinningCoinMesh,
   createStreetPropMesh,
+  createSunCircleMesh,
+  createMoonCircleMesh,
+  createCelestialStarfieldGroup,
+  updateCityNightLighting,
+  SunCircleRig,
+  MoonCircleRig,
+  StarfieldRig,
   createToyTruckMesh,
   createTrafficSignalMesh,
   createTreeMesh,
@@ -84,6 +91,8 @@ import { resetTouchControls, touchControls } from '../game/touchControls';
 import {
   CanalBoat,
   CrashEvent,
+  DayNightCycleMode,
+  DayNightState,
   DuckCrossing,
   GamePhase,
   GeneratedCity,
@@ -119,6 +128,90 @@ const _ndc = new THREE.Vector2();
 const _raycaster = new THREE.Raycaster();
 const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.24);
 const _intersectPt = new THREE.Vector3();
+
+// Scratch color helpers for Zero-GC day/night atmospheric transitions
+const _cSky = new THREE.Color();
+const _cWater = new THREE.Color();
+const _cSunLight = new THREE.Color();
+const _cHemiSky = new THREE.Color();
+const _cHemiGround = new THREE.Color();
+const _cRim = new THREE.Color();
+const _cKeyA = new THREE.Color();
+const _cKeyB = new THREE.Color();
+
+interface DayNightKeyframe {
+  t: number;
+  sky: number;
+  fogNear: number;
+  fogFar: number;
+  water: number;
+  sunCol: number;
+  sunInt: number;
+  hemiSky: number;
+  hemiGnd: number;
+  hemiInt: number;
+  rimCol: number;
+  rimInt: number;
+}
+
+const DAY_NIGHT_KEYFRAMES: DayNightKeyframe[] = [
+  {
+    t: 0.05, // 7:12 AM Dawn / Golden Sunrise
+    sky: 0xf9a885,
+    fogNear: 56,
+    fogFar: 126,
+    water: 0x3a8fa8,
+    sunCol: 0xffd1a4,
+    sunInt: 1.25,
+    hemiSky: 0xffe4d6,
+    hemiGnd: 0x7a9c68,
+    hemiInt: 0.72,
+    rimCol: 0xfecdd3,
+    rimInt: 0.36,
+  },
+  {
+    t: 0.25, // 12:00 PM Bright Midday Sun
+    sky: 0x4bb7ef,
+    fogNear: 58,
+    fogFar: 125,
+    water: 0x3eaee8,
+    sunCol: 0xfff2d2,
+    sunInt: 1.48,
+    hemiSky: 0xd4f0ff,
+    hemiGnd: 0x9ed95c,
+    hemiInt: 0.72,
+    rimCol: 0xbbe6ff,
+    rimInt: 0.38,
+  },
+  {
+    t: 0.52, // 6:30 PM Golden Sunset / Magic Hour
+    sky: 0xf4976c,
+    fogNear: 58,
+    fogFar: 128,
+    water: 0x2b8cbe,
+    sunCol: 0xffb36b,
+    sunInt: 1.62,
+    hemiSky: 0xffd6a5,
+    hemiGnd: 0x8ab17d,
+    hemiInt: 0.78,
+    rimCol: 0xfde68a,
+    rimInt: 0.44,
+  },
+  {
+    t: 0.78, // 11:45 PM Neon Twilight & Starry Midnight
+    sky: 0x152238,
+    fogNear: 52,
+    fogFar: 120,
+    water: 0x111e30,
+    sunCol: 0xa8dadc,
+    sunInt: 0.92,
+    hemiSky: 0x3b5998,
+    hemiGnd: 0x1d2d44,
+    hemiInt: 0.88,
+    rimCol: 0xf72585,
+    rimInt: 0.48,
+  },
+];
 
 const PARTICLE_POOL_SIZE = 96;
 const BREADCRUMB_MAX = 42;
@@ -381,6 +474,15 @@ export function GameCanvas({
     waterPlane.position.y = 0.0;
     waterPlane.receiveShadow = true;
     scene.add(waterPlane);
+
+    // 5. Celestial Sun & Moon Circles, Orbit Rig & Twinkling Starfield
+    const celestialRig = new THREE.Group();
+    scene.add(celestialRig);
+
+    const sunRig = createSunCircleMesh();
+    const moonRig = createMoonCircleMesh();
+    const starfieldRig = createCelestialStarfieldGroup(96);
+    celestialRig.add(sunRig.root, moonRig.root, starfieldRig.root);
 
     // Shared Textures & Beveled Tile Geometries
     const maxAniso = renderer.capabilities.getMaxAnisotropy();
@@ -919,7 +1021,8 @@ export function GameCanvas({
       onHudUpdateRef.current({
         level: currentCity.config.level,
         districtName: currentCity.config.districtName,
-        atmosphere: currentCity.config.atmosphere,
+        atmosphere: currentAtmosphere,
+        dayNight: getDayNightSnapshot(),
         deliveredCount,
         totalStops: currentCity.stops.length,
         timeRemainingSec: Math.max(0, Math.ceil(timeRemainingSec)),
@@ -969,45 +1072,276 @@ export function GameCanvas({
       });
     }
 
-    function applyAtmosphereRig(atm: ShiftAtmosphere) {
-      if (atm === ShiftAtmosphere.GoldenSunset) {
-        scene.background = new THREE.Color(0xf4976c);
-        scene.fog = new THREE.Fog(0xf4976c, 58, 128);
-        waterMat.color.setHex(0x2b8cbe);
-        sunLight.color.setHex(0xffb36b);
-        sunLight.intensity = 1.62;
-        hemiLight.color.setHex(0xffd6a5);
-        hemiLight.groundColor.setHex(0x8ab17d);
-        hemiLight.intensity = 0.78;
-        rimLight.color.setHex(0xfde68a);
-        rimLight.intensity = 0.44;
-        truckRig.headlightCones.visible = false;
-      } else if (atm === ShiftAtmosphere.TwilightNeon) {
-        scene.background = new THREE.Color(0x1d3557);
-        scene.fog = new THREE.Fog(0x1d3557, 54, 122);
-        waterMat.color.setHex(0x152844);
-        sunLight.color.setHex(0xa8dadc);
-        sunLight.intensity = 0.96;
-        hemiLight.color.setHex(0x5289b5);
-        hemiLight.groundColor.setHex(0x2b4560);
-        hemiLight.intensity = 0.92;
-        rimLight.color.setHex(0xf72585);
-        rimLight.intensity = 0.45;
-        truckRig.headlightCones.visible = true;
+    // Dynamic 3D Day & Night Celestial Cycle System
+    let timeOfDay = 0.25; // 0..1 (0.25 = 12:00 PM Midday)
+    let dayNightMode: DayNightCycleMode = 'auto';
+    let dayNightSpeed = 1.0;
+    let currentAtmosphere = ShiftAtmosphere.SunnyHarbor;
+
+    function getDayNightSnapshot(): DayNightState {
+      const normT = ((timeOfDay % 1) + 1) % 1;
+      const totalMinutes = Math.floor(normT * 24 * 60);
+      const hour = Math.floor(totalMinutes / 60);
+      const minute = totalMinutes % 60;
+      const isPm = hour >= 12;
+      const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+      const timeString = `${displayHour}:${String(minute).padStart(2, '0')} ${isPm ? 'PM' : 'AM'}`;
+
+      let periodKind: 'day' | 'sunset' | 'night' | 'dawn';
+      let periodLabel: string;
+      if (normT >= 0.92 || normT < 0.12) {
+        periodKind = 'dawn';
+        periodLabel = 'Dawn Mist';
+      } else if (normT < 0.45) {
+        periodKind = 'day';
+        periodLabel = 'Sunny Day';
+      } else if (normT < 0.62) {
+        periodKind = 'sunset';
+        periodLabel = 'Golden Sunset';
       } else {
-        scene.background = new THREE.Color(0x4bb7ef);
-        scene.fog = new THREE.Fog(0x4bb7ef, 58, 125);
-        waterMat.color.setHex(0x3eaee8);
-        sunLight.color.setHex(0xfff2d2);
-        sunLight.intensity = 1.48;
-        hemiLight.color.setHex(0xd4f0ff);
-        hemiLight.groundColor.setHex(0x9ed95c);
-        hemiLight.intensity = 0.72;
-        rimLight.color.setHex(0xbbe6ff);
-        rimLight.intensity = 0.38;
-        truckRig.headlightCones.visible = false;
+        periodKind = 'night';
+        periodLabel = 'Neon Night';
+      }
+
+      const celestialAngle = (normT - 0.25) * Math.PI * 2;
+      const sunNormY = Math.cos(celestialAngle);
+      const nightFactor = Math.max(0, Math.min(1, (-sunNormY + 0.15) / 1.15));
+      const orbitAngleDeg = Math.round(normT * 360);
+
+      return {
+        timeOfDay: normT,
+        mode: dayNightMode,
+        hour,
+        minute,
+        timeString,
+        periodLabel,
+        periodKind,
+        sunElevation: sunNormY,
+        nightFactor,
+        orbitAngleDeg,
+        speedMultiplier: dayNightSpeed,
+      };
+    }
+
+    function sampleDayNightLighting(tNorm: number) {
+      const N = DAY_NIGHT_KEYFRAMES.length;
+      let idx0 = N - 1;
+      let idx1 = 0;
+      for (let i = 0; i < N; i++) {
+        const next = (i + 1) % N;
+        const tA = DAY_NIGHT_KEYFRAMES[i].t;
+        const tB = DAY_NIGHT_KEYFRAMES[next].t;
+        const inWindow =
+          tB > tA
+            ? tNorm >= tA && tNorm < tB
+            : tNorm >= tA || tNorm < tB;
+        if (inWindow) {
+          idx0 = i;
+          idx1 = next;
+          break;
+        }
+      }
+
+      const kf0 = DAY_NIGHT_KEYFRAMES[idx0];
+      const kf1 = DAY_NIGHT_KEYFRAMES[idx1];
+      let span = kf1.t - kf0.t;
+      if (span <= 0) span += 1.0;
+      let offset = tNorm - kf0.t;
+      if (offset < 0) offset += 1.0;
+      const alpha = Math.max(0, Math.min(1, offset / span));
+
+      _cKeyA.setHex(kf0.sky);
+      _cKeyB.setHex(kf1.sky);
+      _cSky.copy(_cKeyA).lerp(_cKeyB, alpha);
+
+      _cKeyA.setHex(kf0.water);
+      _cKeyB.setHex(kf1.water);
+      _cWater.copy(_cKeyA).lerp(_cKeyB, alpha);
+
+      _cKeyA.setHex(kf0.sunCol);
+      _cKeyB.setHex(kf1.sunCol);
+      _cSunLight.copy(_cKeyA).lerp(_cKeyB, alpha);
+      const sunInt = kf0.sunInt + (kf1.sunInt - kf0.sunInt) * alpha;
+
+      _cKeyA.setHex(kf0.hemiSky);
+      _cKeyB.setHex(kf1.hemiSky);
+      _cHemiSky.copy(_cKeyA).lerp(_cKeyB, alpha);
+
+      _cKeyA.setHex(kf0.hemiGnd);
+      _cKeyB.setHex(kf1.hemiGnd);
+      _cHemiGround.copy(_cKeyA).lerp(_cKeyB, alpha);
+      const hemiInt = kf0.hemiInt + (kf1.hemiInt - kf0.hemiInt) * alpha;
+
+      _cKeyA.setHex(kf0.rimCol);
+      _cKeyB.setHex(kf1.rimCol);
+      _cRim.copy(_cKeyA).lerp(_cKeyB, alpha);
+      const rimInt = kf0.rimInt + (kf1.rimInt - kf0.rimInt) * alpha;
+
+      const fogNear = kf0.fogNear + (kf1.fogNear - kf0.fogNear) * alpha;
+      const fogFar = kf0.fogFar + (kf1.fogFar - kf0.fogFar) * alpha;
+
+      return {
+        sunInt,
+        hemiInt,
+        rimInt,
+        fogNear,
+        fogFar,
+      };
+    }
+
+    function updateDayNightCycle(dt: number) {
+      if (dayNightMode === 'auto') {
+        // Full day & night cycle progresses across ~80s at 1x speed
+        timeOfDay = (timeOfDay + (dt * dayNightSpeed) / 80) % 1.0;
+      }
+      const normT = ((timeOfDay % 1) + 1) % 1;
+
+      // 1. Anchor celestial rig around camera focus
+      celestialRig.position.set(camLookTarget.x, 0, camLookTarget.z);
+
+      // 2. Position celestial Sun & Moon circles along 3D celestial orbital arc
+      const celestialAngle = (normT - 0.25) * Math.PI * 2;
+      const orbitRadius = 72;
+
+      const sunX = Math.sin(celestialAngle) * orbitRadius;
+      const sunY = Math.cos(celestialAngle) * (orbitRadius * 0.72) + 4;
+      const sunZ = -Math.sin(celestialAngle * 0.5) * 22;
+
+      sunRig.root.position.set(sunX, sunY, sunZ);
+      sunRig.root.visible = sunY > -14;
+      if (sunRig.root.visible) {
+        sunRig.root.lookAt(camLookTarget.x, camLookTarget.y + 12, camLookTarget.z);
+        sunRig.raysGroup.rotation.z += dt * 0.45;
+      }
+
+      const moonAngle = celestialAngle + Math.PI;
+      const moonX = Math.sin(moonAngle) * orbitRadius;
+      const moonY = Math.cos(moonAngle) * (orbitRadius * 0.72) + 4;
+      const moonZ = -Math.sin(moonAngle * 0.5) * 22;
+
+      moonRig.root.position.set(moonX, moonY, moonZ);
+      moonRig.root.visible = moonY > -14;
+      if (moonRig.root.visible) {
+        moonRig.root.lookAt(camLookTarget.x, camLookTarget.y + 12, camLookTarget.z);
+        moonRig.companionStar.position.x = 4.2 + Math.cos(visualClock * 1.2) * 0.45;
+        moonRig.companionStar.position.y = 1.8 + Math.sin(visualClock * 1.2) * 0.45;
+        moonRig.companionStar.rotation.z += dt * 0.6;
+      }
+
+      // 3. Compute sun elevation & night factor
+      const sunNormY = Math.cos(celestialAngle);
+      const nightFactor = Math.max(0, Math.min(1, (-sunNormY + 0.15) / 1.15));
+
+      // 4. Update twinkling starfield in night sky
+      starfieldRig.setNightFactor(nightFactor);
+      starfieldRig.updateTwinkle(visualClock);
+
+      // 5. Interpolate sky, fog, water, and 3-point light temperatures
+      const sample = sampleDayNightLighting(normT);
+      scene.background = _cSky;
+      if (scene.fog instanceof THREE.Fog) {
+        scene.fog.color.copy(_cSky);
+        scene.fog.near = sample.fogNear;
+        scene.fog.far = sample.fogFar;
+      }
+      waterMat.color.copy(_cWater);
+
+      // Dynamic directional sun/moon light tracking
+      if (sunY > 0) {
+        sunLight.position.set(
+          camLookTarget.x + Math.max(-26, Math.min(26, sunX * 0.42)),
+          Math.max(14, sunY * 0.72),
+          camLookTarget.z + 14 + sunZ * 0.25,
+        );
+      } else {
+        sunLight.position.set(
+          camLookTarget.x + Math.max(-26, Math.min(26, moonX * 0.42)),
+          Math.max(16, moonY * 0.72),
+          camLookTarget.z + 14 + moonZ * 0.25,
+        );
+      }
+      sunLight.target.position.copy(camLookTarget);
+      sunLight.color.copy(_cSunLight);
+      sunLight.intensity = sample.sunInt;
+
+      hemiLight.color.copy(_cHemiSky);
+      hemiLight.groundColor.copy(_cHemiGround);
+      hemiLight.intensity = sample.hemiInt;
+
+      rimLight.color.copy(_cRim);
+      rimLight.intensity = sample.rimInt;
+
+      // 6. City lights: Headlights on van, streetlamp lanterns, and window glow
+      truckRig.headlightCones.visible = nightFactor > 0.18;
+      updateCityNightLighting(nightFactor);
+
+      // 7. Update currentAtmosphere enum
+      if (normT >= 0.45 && normT < 0.62) {
+        currentAtmosphere = ShiftAtmosphere.GoldenSunset;
+      } else if (normT >= 0.62 && normT < 0.92) {
+        currentAtmosphere = ShiftAtmosphere.TwilightNeon;
+      } else {
+        currentAtmosphere = ShiftAtmosphere.SunnyHarbor;
       }
     }
+
+    function setDayNightMode(nextMode: DayNightCycleMode) {
+      dayNightMode = nextMode;
+      let label = 'Day & Night Circles';
+      let detail = 'Auto 24h Celestial Orbit Active';
+      let tone: 'emerald' | 'amber' | 'rose' = 'emerald';
+
+      if (nextMode === 'day') {
+        timeOfDay = 0.25;
+        pokoAudio.playCelestialChime(false);
+        label = 'Time of Day';
+        detail = 'Sunny Harbor · 12:00 PM';
+        tone = 'amber';
+      } else if (nextMode === 'sunset') {
+        timeOfDay = 0.52;
+        pokoAudio.playCelestialChime(false);
+        label = 'Time of Day';
+        detail = 'Golden Sunset · 6:30 PM';
+        tone = 'amber';
+      } else if (nextMode === 'night') {
+        timeOfDay = 0.78;
+        pokoAudio.playCelestialChime(true);
+        label = 'Time of Day';
+        detail = 'Neon Twilight · 11:45 PM';
+        tone = 'amber';
+      } else {
+        pokoAudio.playCelestialChime(false);
+      }
+
+      bannerEvent = {
+        id: ++bannerSeq,
+        label,
+        detail,
+        tone,
+      };
+      bannerTimer = 1.85;
+      updateDayNightCycle(0);
+      emitHudSnapshot();
+    }
+
+    function cycleDayNightMode() {
+      if (dayNightMode === 'auto') {
+        setDayNightMode('day');
+      } else if (dayNightMode === 'day') {
+        setDayNightMode('sunset');
+      } else if (dayNightMode === 'sunset') {
+        setDayNightMode('night');
+      } else {
+        setDayNightMode('auto');
+      }
+    }
+
+    function setSpecificTimeOfDay(t: number) {
+      timeOfDay = ((t % 1) + 1) % 1;
+      updateDayNightCycle(0);
+      emitHudSnapshot();
+    }
+
 
     function buildCityScene(lvl: number, resetScore: boolean) {
       clearAllInputs();
@@ -1033,7 +1367,16 @@ export function GameCanvas({
       }
       truckRig.setVehicleStyle(activeVeh);
       truckRig.setTopper(activeTop);
-      applyAtmosphereRig(currentCity.config.atmosphere);
+      if (dayNightMode === 'auto') {
+        if (currentCity.config.atmosphere === ShiftAtmosphere.GoldenSunset) {
+          timeOfDay = 0.52;
+        } else if (currentCity.config.atmosphere === ShiftAtmosphere.TwilightNeon) {
+          timeOfDay = 0.78;
+        } else {
+          timeOfDay = 0.25;
+        }
+      }
+      updateDayNightCycle(0);
       pokoAudio.setFeverMode(false);
 
       if (resetScore) {
@@ -1538,8 +1881,7 @@ export function GameCanvas({
         camera.lookAt(camLookTarget);
       }
       waterPlane.position.set(camLookTarget.x, 0.0, camLookTarget.z);
-      sunLight.position.set(camLookTarget.x + 18, 32, camLookTarget.z + 14);
-      sunLight.target.position.copy(camLookTarget);
+      updateDayNightCycle(0);
       syncTruckParcelStack();
       refreshForwardRoadPath();
       emitHudSnapshot();
@@ -1635,6 +1977,17 @@ export function GameCanvas({
             : GamePhase.Playing,
         );
       }
+
+      // Quick keyboard toggle for Day / Sunset / Night Celestial Circles
+      if (
+        (e.code === 'KeyN' || e.code === 'KeyT') &&
+        !e.repeat &&
+        (phaseRef.current === GamePhase.Playing ||
+          phaseRef.current === GamePhase.Title ||
+          phaseRef.current === GamePhase.Paused)
+      ) {
+        cycleDayNightMode();
+      }
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
@@ -1662,6 +2015,21 @@ export function GameCanvas({
     const onPointerUp = () => {
       pointerDown = false;
     };
+
+    // Custom window event triggers for HUD and Title Overlay Day/Night widgets
+    const onCycleDayNightEvt = () => cycleDayNightMode();
+    const onSetDayNightModeEvt = (e: Event) => {
+      const detail = (e as CustomEvent<{ mode: DayNightCycleMode }>).detail;
+      if (detail?.mode) setDayNightMode(detail.mode);
+    };
+    const onSetTimeOfDayEvt = (e: Event) => {
+      const detail = (e as CustomEvent<{ timeOfDay: number }>).detail;
+      if (typeof detail?.timeOfDay === 'number') setSpecificTimeOfDay(detail.timeOfDay);
+    };
+
+    window.addEventListener('poko:cycle-day-night', onCycleDayNightEvt);
+    window.addEventListener('poko:set-day-night-mode', onSetDayNightModeEvt);
+    window.addEventListener('poko:set-time-of-day', onSetTimeOfDayEvt);
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -1874,6 +2242,7 @@ export function GameCanvas({
       const dt = Math.min(Math.max(rawDt, 0.001), 0.05);
       const cdDt = Math.min(Math.max(rawDt, 0.001), 0.35);
       visualClock += dt;
+      updateDayNightCycle(dt);
 
       const currentPhase = phaseRef.current;
 
@@ -3055,8 +3424,6 @@ export function GameCanvas({
         }
 
         waterPlane.position.set(camLookTarget.x, 0.0, camLookTarget.z);
-        sunLight.position.set(camLookTarget.x + 18, 32, camLookTarget.z + 14);
-        sunLight.target.position.copy(camLookTarget);
 
         // Keep minimap snapshot smooth every frame while throttling React HUD state to ~8Hz
         syncMinimapSnapshot();
@@ -3641,7 +4008,9 @@ export function GameCanvas({
       pokoAudio.setMusicPlaying(false);
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
-      resizeObs.disconnect();
+      window.removeEventListener('poko:cycle-day-night', onCycleDayNightEvt);
+      window.removeEventListener('poko:set-day-night-mode', onSetDayNightModeEvt);
+      window.removeEventListener('poko:set-time-of-day', onSetTimeOfDayEvt);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlurOrHidden);

@@ -347,6 +347,26 @@ class PokoAudioEngine {
     });
   }
 
+  public playCelestialChime(isNight: boolean): void {
+    if (isNight) {
+      // Gentle dreamy harp / bell arpeggio descending into starry evening
+      const nightNotes = [1174.66, 880.0, 659.25, 523.25];
+      nightNotes.forEach((f, i) => {
+        this.playTone(f, 0.22, 'sine', 0.09, i * 0.045);
+        this.playTone(f * 1.5, 0.14, 'triangle', 0.04, i * 0.045 + 0.01);
+      });
+      this.playFilteredNoise(0.18, 'bandpass', 1800, 3200, 3.0, 0.05, 0.02);
+    } else {
+      // Bright sparkling bell arpeggio ascending into daylight / sunrise
+      const dayNotes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+      dayNotes.forEach((f, i) => {
+        this.playTone(f, 0.2, 'triangle', 0.095, i * 0.04);
+        this.playTone(f * 2, 0.12, 'sine', 0.045, i * 0.04 + 0.01);
+      });
+      this.playFilteredNoise(0.15, 'highpass', 2400, 4200, 2.0, 0.04, 0);
+    }
+  }
+
   public playTossWhoosh(): void {
     const jitter = 0.93 + Math.random() * 0.14;
     this.playFilteredNoise(0.16, 'bandpass', 420 * jitter, 1650 * jitter, 2.2, 0.15, 0);

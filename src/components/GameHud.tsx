@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { resetTouchControls, touchControls } from '../game/touchControls';
 import {
+  DayNightState,
   GeneratedCity,
   HazardKind,
   HudState,
@@ -161,6 +162,218 @@ const RedAlertBadge: React.FC = () => (
     <circle cx="13.2" cy="19.8" r="2" fill="#ffffff" />
   </svg>
 );
+
+/**
+ * Arcade Day & Night Circles Widget:
+ * Features an animated celestial dial with rotating Sun and Moon disks,
+ * dynamic time-of-day readout, and click-to-cycle or popover time selector!
+ */
+export const DayNightCircleWidget: React.FC<{ dayNight?: DayNightState }> = ({
+  dayNight,
+}) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const dn = dayNight ?? {
+    timeOfDay: 0.25,
+    mode: 'auto' as const,
+    hour: 12,
+    minute: 0,
+    timeString: '12:00 PM',
+    periodLabel: 'Sunny Day',
+    periodKind: 'day' as const,
+    sunElevation: 1,
+    nightFactor: 0,
+    orbitAngleDeg: 90,
+    speedMultiplier: 1,
+  };
+
+  const isNight = dn.periodKind === 'night';
+  const isSunset = dn.periodKind === 'sunset';
+  const isDawn = dn.periodKind === 'dawn';
+
+  const rimGradient = isNight
+    ? 'linear-gradient(180deg, #818cf8 0%, #3730a3 100%)'
+    : isSunset
+      ? 'linear-gradient(180deg, #fb923c 0%, #c2410c 100%)'
+      : isDawn
+        ? 'linear-gradient(180deg, #f472b6 0%, #be185d 100%)'
+        : 'linear-gradient(180deg, #fde047 0%, #d97706 100%)';
+
+  const handleCycle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('poko:cycle-day-night'));
+  };
+
+  const handleSetMode = (
+    mode: 'auto' | 'day' | 'sunset' | 'night',
+    e: React.MouseEvent,
+  ) => {
+    e.stopPropagation();
+    window.dispatchEvent(
+      new CustomEvent('poko:set-day-night-mode', { detail: { mode } }),
+    );
+    setMenuOpen(false);
+  };
+
+  return (
+    <div className="relative pointer-events-auto flex items-center">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Time of Day: ${dn.periodLabel} (${dn.timeString}). Tap to cycle [T or N]`}
+        title={`Day & Night Circles: ${dn.periodLabel} (${dn.timeString}) · Click to toggle [Key: T / N]`}
+        onClick={handleCycle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('poko:cycle-day-night'));
+          }
+        }}
+        className="group relative flex items-center arcade-pill-brown rounded-full h-8 md:h-10 pl-1.5 md:pl-2 pr-2.5 md:pr-3.5 gap-1.5 md:gap-2 cursor-pointer transition-transform duration-100 hover:scale-[1.03] active:scale-[0.98]"
+      >
+        {/* Animated Rotating Celestial Circle Dial */}
+        <div
+          className="relative w-6 h-6 md:w-7 md:h-7 rounded-full border-2 border-[#140c04] overflow-hidden shrink-0 shadow-inner flex items-center justify-center transition-all duration-300"
+          style={{ background: rimGradient }}
+        >
+          {/* Rotating celestial circle svg */}
+          <svg
+            viewBox="0 0 32 32"
+            className="w-full h-full transition-transform duration-300 ease-out"
+            style={{ transform: `rotate(${dn.orbitAngleDeg}deg)` }}
+            aria-hidden="true"
+          >
+            {/* Top Sun Circle ☀️ */}
+            <circle
+              cx="16"
+              cy="6"
+              r="4.2"
+              fill="#ffe629"
+              stroke="#140c04"
+              strokeWidth="1.2"
+            />
+            <path
+              d="M16 0.5v2M16 9.5v2M10.5 6h-2M23.5 6h-2"
+              stroke="#f59e0b"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+            />
+            {/* Center Axis Star */}
+            <circle cx="16" cy="16" r="1.4" fill="#ffffff" />
+            {/* Bottom Moon Circle 🌙 */}
+            <circle
+              cx="16"
+              cy="26"
+              r="3.8"
+              fill="#e2e8f0"
+              stroke="#140c04"
+              strokeWidth="1.2"
+            />
+            <circle cx="17.2" cy="25" r="3.0" fill="#1e293b" />
+          </svg>
+        </div>
+
+        {/* Time Readout & Mode Badge */}
+        <div className="flex flex-col items-start leading-tight">
+          <div className="flex items-center gap-1">
+            <span
+              className={`arcade-stroke-sm text-xs md:text-sm whitespace-nowrap ${
+                isNight
+                  ? 'text-[#a5b4fc]'
+                  : isSunset
+                    ? 'text-[#fdba74]'
+                    : isDawn
+                      ? 'text-[#f472b6]'
+                      : 'text-[#fef08a]'
+              }`}
+            >
+              {isNight ? '🌙' : isSunset ? '🌅' : isDawn ? '✨' : '☀️'}{' '}
+              {dn.timeString}
+            </span>
+            <span className="hidden sm:inline-block text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-amber-200/90 font-num">
+              {dn.mode === 'auto' ? 'AUTO ↻' : dn.mode.toUpperCase()}
+            </span>
+          </div>
+        </div>
+
+        {/* Dropdown caret toggle */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Toggle Day & Night options"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          className="text-amber-200/70 hover:text-white text-xs pl-0.5 -mr-1 cursor-pointer"
+        >
+          ▾
+        </button>
+      </div>
+
+      {/* Popover Menu with Quick Time of Day Selector */}
+      {menuOpen && (
+        <div
+          className="absolute top-full left-0 mt-2 z-50 bg-[#2d1c0b] border-[3px] border-[#140c04] rounded-2xl p-2.5 shadow-2xl flex flex-col gap-1.5 min-w-[200px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between pb-1 border-b border-amber-900/40">
+            <span className="arcade-stroke-sm text-amber-300 text-xs uppercase">
+              Day & Night Circles
+            </span>
+            <span className="text-[10px] text-amber-100/60 font-semibold">[T] or [N]</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5 pt-1">
+            <button
+              type="button"
+              onClick={(e) => handleSetMode('auto', e)}
+              className={`px-2.5 py-1.5 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                dn.mode === 'auto'
+                  ? 'bg-amber-500 border-amber-200 text-white shadow'
+                  : 'bg-[#493214] border-[#140c04] text-amber-100/80 hover:bg-[#5a3f1a]'
+              }`}
+            >
+              <span>🔄</span> Auto 24h
+            </button>
+            <button
+              type="button"
+              onClick={(e) => handleSetMode('day', e)}
+              className={`px-2.5 py-1.5 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                dn.mode === 'day'
+                  ? 'bg-amber-500 border-amber-200 text-white shadow'
+                  : 'bg-[#493214] border-[#140c04] text-amber-100/80 hover:bg-[#5a3f1a]'
+              }`}
+            >
+              <span>☀️</span> Day (12 PM)
+            </button>
+            <button
+              type="button"
+              onClick={(e) => handleSetMode('sunset', e)}
+              className={`px-2.5 py-1.5 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                dn.mode === 'sunset'
+                  ? 'bg-amber-500 border-amber-200 text-white shadow'
+                  : 'bg-[#493214] border-[#140c04] text-amber-100/80 hover:bg-[#5a3f1a]'
+              }`}
+            >
+              <span>🌅</span> Sunset (6:30)
+            </button>
+            <button
+              type="button"
+              onClick={(e) => handleSetMode('night', e)}
+              className={`px-2.5 py-1.5 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                dn.mode === 'night'
+                  ? 'bg-amber-500 border-amber-200 text-white shadow'
+                  : 'bg-[#493214] border-[#140c04] text-amber-100/80 hover:bg-[#5a3f1a]'
+              }`}
+            >
+              <span>🌙</span> Night (11 PM)
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const GameHud: React.FC<GameHudProps> = ({
   hud,
@@ -654,6 +867,9 @@ export const GameHud: React.FC<GameHudProps> = ({
                   </svg>
                 </button>
               </div>
+
+              {/* Day & Night Celestial Circles Interactive Widget */}
+              <DayNightCircleWidget dayNight={hud.dayNight} />
             </div>
 
             {/* Reference 4: Left-Edge Semicircular Docked Action Buttons (Compact on Mobile, Full Size on Desktop) */}

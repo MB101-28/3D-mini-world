@@ -35,6 +35,31 @@ function markShared<T extends THREE.BufferGeometry | THREE.Material>(asset: T): 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 const matCache = new Map<string, THREE.MeshStandardMaterial>();
 
+export const streetlampLanternMat = markShared(
+  new THREE.MeshStandardMaterial({
+    color: 0xfff5c0,
+    roughness: 0.2,
+    metalness: 0.05,
+    emissive: 0xffd166,
+    emissiveIntensity: 0.4,
+  }),
+);
+
+export const windowNightMats: THREE.MeshStandardMaterial[] = [];
+
+export function updateCityNightLighting(nightFactor: number): void {
+  // Streetlamp bulbs glow warmly into the evening
+  streetlampLanternMat.emissiveIntensity = 0.22 + nightFactor * 1.95;
+
+  // Building windows across all 8 architectural styles softly glow cozy golden-amber at night
+  const winEmissive = nightFactor * 0.78;
+  for (let i = 0; i < windowNightMats.length; i++) {
+    const wm = windowNightMats[i];
+    wm.emissive.setHex(0xffaa33);
+    wm.emissiveIntensity = winEmissive;
+  }
+}
+
 function getCachedStandardMat(
   colorHex: number,
   roughness: number = 0.65,
@@ -1526,6 +1551,9 @@ export function createPastelBuildingMesh(
   const wallMat = getCachedStandardMat(colors.wall, 0.7, 0.03);
   const trimMat = getCachedStandardMat(colors.trim, 0.48, 0.04);
   const winMat = getCachedStandardMat(colors.window, 0.16, 0.24);
+  if (!windowNightMats.includes(winMat)) {
+    windowNightMats.push(winMat);
+  }
   const accentMat = getCachedStandardMat(colors.accent, 0.46, 0.06);
   const roofMat = getCachedStandardMat(colors.roof, 0.62, 0.06);
   const darkMetalMat = getCachedStandardMat(0x374151, 0.55, 0.25);
@@ -1972,7 +2000,7 @@ export function createStreetPropMesh(
       ironMat,
     );
     arm.position.set(0.11, 1.36, 0);
-    const lanternMat = getCachedStandardMat(0xfff5c0, 0.2, 0.05, 0xffd166, 0.85);
+    const lanternMat = streetlampLanternMat;
     const bulb = new THREE.Mesh(
       getSharedGeo('lamp_bulb', () => new THREE.SphereGeometry(0.115, 12, 10)),
       lanternMat,
@@ -3476,6 +3504,346 @@ export function createSpinningCoinMesh(): THREE.Group {
   );
   g.add(disc, rim, emblem);
   return g;
+}
+
+export interface SunCircleRig {
+  root: THREE.Group;
+  raysGroup: THREE.Group;
+  haloMesh: THREE.Mesh;
+}
+
+export interface MoonCircleRig {
+  root: THREE.Group;
+  haloMesh: THREE.Mesh;
+  companionStar: THREE.Group;
+}
+
+export interface StarfieldRig {
+  root: THREE.Group;
+  setNightFactor: (factor: number) => void;
+  updateTwinkle: (time: number) => void;
+}
+
+/**
+ * Procedural 3D Golden Sun Circle with rotating solar corona petal rays,
+ * beveled rim, whimsical button-eyed smile, and radiant celestial glow disk!
+ */
+export function createSunCircleMesh(): SunCircleRig {
+  const root = new THREE.Group();
+
+  const sunGoldMat = getCachedStandardMat(0xffe033, 0.2, 0.05, 0xff9900, 0.9);
+  const sunRimMat = getCachedStandardMat(0xf59e0b, 0.28, 0.08, 0xd97706, 0.6);
+  const rayGoldMat = getCachedStandardMat(0xffd026, 0.25, 0.04, 0xf59e0b, 0.7);
+  const rayOrangeMat = getCachedStandardMat(0xf97316, 0.3, 0.05, 0xe11d48, 0.5);
+  const eyeMat = getCachedStandardMat(0x140c04, 0.15, 0.1, 0x000000, 0);
+  const whiteMat = getCachedStandardMat(0xffffff, 0.1, 0.02, 0xffffff, 0.4);
+  const blushMat = getCachedStandardMat(0xfb7185, 0.4, 0.02, 0xf43f5e, 0.4);
+
+  // 1. Core Sun Circle Disk (facing forward along Z)
+  const core = new THREE.Mesh(
+    getSharedGeo('sun_core_disc', () => {
+      const g = new THREE.CylinderGeometry(3.6, 3.6, 0.48, 36);
+      g.rotateX(Math.PI / 2);
+      return g;
+    }),
+    sunGoldMat,
+  );
+  root.add(core);
+
+  // 2. Beveled Golden Torus Outer Rim
+  const rim = new THREE.Mesh(
+    getSharedGeo('sun_torus_rim', () => new THREE.TorusGeometry(3.58, 0.26, 12, 36)),
+    sunRimMat,
+  );
+  root.add(rim);
+
+  // Inner subtle decorative accent ring
+  const innerRing = new THREE.Mesh(
+    getSharedGeo('sun_inner_ring', () => new THREE.TorusGeometry(2.35, 0.12, 8, 32)),
+    sunRimMat,
+  );
+  innerRing.position.z = 0.25;
+  root.add(innerRing);
+
+  // 3. Rotating Solar Corona Petal Rays (12 triangular stylized spikes)
+  const raysGroup = new THREE.Group();
+  const rayGeo = getSharedGeo('sun_ray_spike', () => {
+    const g = new THREE.ConeGeometry(0.72, 1.85, 4);
+    g.scale(1, 1, 0.38);
+    g.translate(0, 0.92, 0);
+    return g;
+  });
+
+  const RAY_COUNT = 12;
+  for (let i = 0; i < RAY_COUNT; i++) {
+    const angle = (i / RAY_COUNT) * Math.PI * 2;
+    const rayMesh = new THREE.Mesh(
+      rayGeo,
+      i % 2 === 0 ? rayGoldMat : rayOrangeMat,
+    );
+    rayMesh.position.set(
+      Math.cos(angle) * 3.75,
+      Math.sin(angle) * 3.75,
+      0,
+    );
+    rayMesh.rotation.z = angle - Math.PI / 2;
+    raysGroup.add(rayMesh);
+  }
+  root.add(raysGroup);
+
+  // 4. Whimsical Friendly Arcade Smile & Button Eyes
+  const faceGroup = new THREE.Group();
+  faceGroup.position.z = 0.26;
+
+  // Eyes
+  const eyeGeo = getSharedGeo('sun_eye', () => new THREE.SphereGeometry(0.24, 12, 8));
+  const glintGeo = getSharedGeo('sun_glint', () => new THREE.SphereGeometry(0.08, 8, 6));
+
+  for (const sign of [-1, 1]) {
+    const eye = new THREE.Mesh(eyeGeo, eyeMat);
+    eye.position.set(sign * 1.15, 0.42, 0);
+    const glint = new THREE.Mesh(glintGeo, whiteMat);
+    glint.position.set(sign * 1.15 + 0.08, 0.5, 0.18);
+    faceGroup.add(eye, glint);
+
+    // Cute blush dots
+    const blush = new THREE.Mesh(
+      getSharedGeo('sun_blush', () => {
+        const g = new THREE.CylinderGeometry(0.38, 0.38, 0.04, 14);
+        g.rotateX(Math.PI / 2);
+        return g;
+      }),
+      blushMat,
+    );
+    blush.position.set(sign * 1.62, 0.08, 0.02);
+    faceGroup.add(blush);
+  }
+
+  // Smile arc
+  const smile = new THREE.Mesh(
+    getSharedGeo('sun_smile', () => {
+      const g = new THREE.TorusGeometry(0.65, 0.09, 8, 20, Math.PI);
+      g.rotateZ(Math.PI);
+      return g;
+    }),
+    eyeMat,
+  );
+  smile.position.set(0, 0.12, 0);
+  faceGroup.add(smile);
+  root.add(faceGroup);
+
+  // 5. Soft Radiant Outer Glow Disc (Double-sided transparent halo)
+  const haloGeo = getSharedGeo('sun_halo_disc', () => new THREE.RingGeometry(3.6, 6.8, 36));
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xffea75,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const haloMesh = new THREE.Mesh(haloGeo, haloMat);
+  haloMesh.position.z = -0.05;
+  root.add(haloMesh);
+
+  return { root, raysGroup, haloMesh };
+}
+
+/**
+ * Procedural 3D Silver-Ivory Moon Circle with crater relief,
+ * serene sleepy eyes, celestial halo aura ring, and tiny companion star!
+ */
+export function createMoonCircleMesh(): MoonCircleRig {
+  const root = new THREE.Group();
+
+  const moonIvoryMat = getCachedStandardMat(0xedf2f7, 0.24, 0.06, 0xa5b4fc, 0.75);
+  const moonRimMat = getCachedStandardMat(0xc7d2fe, 0.3, 0.08, 0x818cf8, 0.55);
+  const craterMat = getCachedStandardMat(0x94a3b8, 0.36, 0.04, 0x64748b, 0.4);
+  const eyeMat = getCachedStandardMat(0x1e1b4b, 0.18, 0.08, 0x000000, 0);
+  const starGoldMat = getCachedStandardMat(0xfde047, 0.22, 0.08, 0xeab308, 0.8);
+  const blushMat = getCachedStandardMat(0xf472b6, 0.45, 0.02, 0xdb2777, 0.35);
+
+  // 1. Core Moon Circle Disk (facing forward along Z)
+  const core = new THREE.Mesh(
+    getSharedGeo('moon_core_disc', () => {
+      const g = new THREE.CylinderGeometry(3.2, 3.2, 0.44, 36);
+      g.rotateX(Math.PI / 2);
+      return g;
+    }),
+    moonIvoryMat,
+  );
+  root.add(core);
+
+  // 2. Beveled Periwinkle-Silver Torus Rim
+  const rim = new THREE.Mesh(
+    getSharedGeo('moon_torus_rim', () => new THREE.TorusGeometry(3.18, 0.24, 12, 36)),
+    moonRimMat,
+  );
+  root.add(rim);
+
+  // 3. Stylized Circular Crater Reliefs
+  const craterSpecs = [
+    { r: 0.62, x: 1.25, y: 1.15 },
+    { r: 0.46, x: 1.85, y: -0.35 },
+    { r: 0.38, x: -1.35, y: 1.45 },
+  ];
+
+  craterSpecs.forEach((sp, idx) => {
+    const crater = new THREE.Mesh(
+      getSharedGeo(`moon_crater_${idx}`, () => {
+        const g = new THREE.CylinderGeometry(sp.r, sp.r, 0.06, 16);
+        g.rotateX(Math.PI / 2);
+        return g;
+      }),
+      craterMat,
+    );
+    crater.position.set(sp.x, sp.y, 0.23);
+    root.add(crater);
+  });
+
+  // 4. Serene Sleepy / Dreaming Face
+  const faceGroup = new THREE.Group();
+  faceGroup.position.z = 0.24;
+
+  const sleepyEyeGeo = getSharedGeo('moon_sleepy_eye', () => {
+    const g = new THREE.TorusGeometry(0.3, 0.065, 8, 16, Math.PI);
+    return g;
+  });
+
+  for (const sign of [-1, 1]) {
+    const eye = new THREE.Mesh(sleepyEyeGeo, eyeMat);
+    eye.position.set(sign * 0.95 - 0.25, 0.25, 0);
+    faceGroup.add(eye);
+
+    const blush = new THREE.Mesh(
+      getSharedGeo('moon_blush', () => {
+        const g = new THREE.CylinderGeometry(0.28, 0.28, 0.04, 12);
+        g.rotateX(Math.PI / 2);
+        return g;
+      }),
+      blushMat,
+    );
+    blush.position.set(sign * 1.35 - 0.25, -0.05, 0.02);
+    faceGroup.add(blush);
+  }
+
+  // Soft content smile
+  const smile = new THREE.Mesh(
+    getSharedGeo('moon_smile', () => {
+      const g = new THREE.TorusGeometry(0.48, 0.06, 8, 16, Math.PI * 0.85);
+      g.rotateZ(Math.PI * 1.08);
+      return g;
+    }),
+    eyeMat,
+  );
+  smile.position.set(-0.25, -0.05, 0);
+  faceGroup.add(smile);
+  root.add(faceGroup);
+
+  // 5. Soft Pearlescent Celestial Halo Aura
+  const haloGeo = getSharedGeo('moon_halo_disc', () => new THREE.RingGeometry(3.2, 5.8, 36));
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xa5b4fc,
+    transparent: true,
+    opacity: 0.32,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const haloMesh = new THREE.Mesh(haloGeo, haloMat);
+  haloMesh.position.z = -0.05;
+  root.add(haloMesh);
+
+  // 6. Tiny Orbiting Companion Cartoon Star!
+  const companionStar = new THREE.Group();
+  const starCore = new THREE.Mesh(
+    getSharedGeo('star_dia_core', () => new THREE.OctahedronGeometry(0.55, 0)),
+    starGoldMat,
+  );
+  const starRing = new THREE.Mesh(
+    getSharedGeo('star_dia_ring', () => new THREE.TorusGeometry(0.52, 0.08, 6, 16)),
+    moonRimMat,
+  );
+  companionStar.add(starCore, starRing);
+  companionStar.position.set(4.2, 1.8, 0);
+  root.add(companionStar);
+
+  return { root, haloMesh, companionStar };
+}
+
+/**
+ * Procedural Celestial Starfield Dome with cartoon twinkling stars
+ * whose visibility smoothly transitions with the night factor!
+ */
+export function createCelestialStarfieldGroup(count = 96): StarfieldRig {
+  const root = new THREE.Group();
+
+  const starMat = new THREE.MeshBasicMaterial({
+    color: 0xfffae0,
+    transparent: true,
+    opacity: 0.0,
+    depthWrite: false,
+  });
+
+  const starGeo = getSharedGeo('celestial_star_geom', () => {
+    return new THREE.OctahedronGeometry(0.42, 0);
+  });
+
+  interface StarItem {
+    mesh: THREE.Mesh;
+    baseScale: number;
+    phase: number;
+    speed: number;
+  }
+  const stars: StarItem[] = [];
+
+  // Deterministic pseudo-random placement in celestial dome
+  let seed = 12345;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  for (let i = 0; i < count; i++) {
+    const r = 78 + rand() * 32;
+    const theta = 0.22 + rand() * 1.15; // upper dome
+    const phi = rand() * Math.PI * 2;
+
+    const x = r * Math.sin(theta) * Math.cos(phi);
+    const y = r * Math.cos(theta);
+    const z = r * Math.sin(theta) * Math.sin(phi);
+
+    const mesh = new THREE.Mesh(starGeo, starMat);
+    mesh.position.set(x, Math.max(16, y), z);
+
+    const baseScale = 0.75 + rand() * 0.7;
+    mesh.scale.setScalar(baseScale);
+    mesh.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
+
+    root.add(mesh);
+    stars.push({
+      mesh,
+      baseScale,
+      phase: rand() * Math.PI * 2,
+      speed: 1.8 + rand() * 2.4,
+    });
+  }
+
+  const setNightFactor = (factor: number) => {
+    // Stars fade in during dusk and shine brilliant during full night
+    const op = Math.max(0, Math.min(0.92, (factor - 0.2) * 1.25));
+    starMat.opacity = op;
+    root.visible = op > 0.01;
+  };
+
+  const updateTwinkle = (time: number) => {
+    if (!root.visible) return;
+    for (let i = 0; i < stars.length; i++) {
+      const st = stars[i];
+      const sc = st.baseScale * (0.82 + 0.36 * Math.sin(time * st.speed + st.phase));
+      st.mesh.scale.setScalar(sc);
+    }
+  };
+
+  return { root, setNightFactor, updateTwinkle };
 }
 
 

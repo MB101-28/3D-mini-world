@@ -23,6 +23,22 @@ export enum ShiftAtmosphere {
   TwilightNeon = 'twilight_neon',
 }
 
+export type DayNightCycleMode = 'auto' | 'day' | 'sunset' | 'night';
+
+export interface DayNightState {
+  timeOfDay: number; // 0..1 (0=6:00 AM dawn, 0.25=12:00 PM noon, 0.5=6:00 PM sunset, 0.75=midnight)
+  mode: DayNightCycleMode;
+  hour: number; // 0..23
+  minute: number; // 0..59
+  timeString: string; // e.g. "12:00 PM"
+  periodLabel: string; // "Sunny Day" | "Golden Sunset" | "Neon Night" | "Dawn Glow"
+  periodKind: 'day' | 'sunset' | 'night' | 'dawn';
+  sunElevation: number; // -1..1
+  nightFactor: number; // 0..1 (0=bright noon, 1=deep night)
+  orbitAngleDeg: number; // 0..360
+  speedMultiplier: number; // 1 | 2 | 0
+}
+
 export enum VehicleId {
   ClassicVan = 'classic_van',
   KeiTruck = 'kei_truck',
@@ -548,6 +564,7 @@ export interface HudState {
   isDrifting: boolean;
   speedKmh: number;
   bannerEvent: HudBannerEvent | null;
+  dayNight?: DayNightState;
   countdownStage?: CountdownStage;
   rocketStartStatus?: RocketStartStatus;
   demoActive?: boolean;

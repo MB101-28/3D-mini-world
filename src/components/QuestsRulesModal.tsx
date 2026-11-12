@@ -116,6 +116,12 @@ export const QuestsRulesModal: React.FC<QuestsRulesModalProps> = ({
             <strong>Hot Thermal</strong> bags fast, brake for <strong>Large Crates</strong>,
             and hit <strong>Wrench Garages</strong> for Hull + Shield!
           </div>
+          <div>
+            <strong className="font-display text-[#2b1b08]">
+              Day &amp; Night Circles [T / N]:
+            </strong>{' '}
+            Tap the <strong>Celestial Circle</strong> on the HUD or press <strong>[T]</strong> / <strong>[N]</strong> to transition between Sunny Day ☀️, Golden Sunset 🌅, and Starry Neon Night 🌙 (or let the 24h orbit run automatically!).
+          </div>
         </div>
 
         <button
